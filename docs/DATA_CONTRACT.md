@@ -27,5 +27,5 @@ Osteophyte (raw label 5) is merged into cartilage (2).
 
 ## Open Questions
 
-- Human label schema: adult human knees have no growth plate; osteophyte handling may differ since surgeons sometimes shave them
-- Whether "marrow" (4) corresponds to trabecular bone for quantification
+- Human label schema: adult human knees have no growth plate; osteophyte handling may differ since surgeons sometimes shave them. We are ignoring osteophytes for now.
+- Whether "marrow" (4) corresponds to trabecular bone for quantification (future project maybe).
