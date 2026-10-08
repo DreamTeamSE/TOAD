@@ -1,0 +1,14 @@
+name: nnunet
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - opencv
+  - pillow
+  - pip
+  - pip:
+      - nnunetv2
