@@ -13,6 +13,11 @@ predictions/
 # model weights
 *.keras
 
+# nnU-Net working directories
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
 # OS / editor
 .DS_Store
 .vscode/
