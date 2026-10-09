@@ -199,15 +199,38 @@ def resize_image(img_bgr: np.ndarray, width: int, height: int) -> np.ndarray:
     return cv2.resize(img_bgr, (width, height), interpolation=cv2.INTER_AREA)
 
 
+def _rescale_mask(mask: np.ndarray, size: tuple[int, int], fx: float, fy: float) -> np.ndarray:
+    """
+    Resize a class-ID mask without ever blending IDs.
+
+    Downscaling: area vote. Each output pixel takes the class covering most of its
+    footprint, the same footprint INTER_AREA averages for the image, so labels line
+    up with image pixels at class boundaries (plain nearest neighbour copies the
+    footprint's top-left pixel instead). Ties go to the lower class ID.
+    Upscaling: center-aligned nearest neighbour.
+    """
+    if fx >= 1.0 and fy >= 1.0:
+        interp = getattr(cv2, "INTER_NEAREST_EXACT", cv2.INTER_NEAREST)
+        return cv2.resize(mask, size, interpolation=interp)
+    best_share = np.full((size[1], size[0]), -1.0, dtype=np.float32)
+    labels = np.zeros((size[1], size[0]), dtype=mask.dtype)
+    for class_id in np.unique(mask):
+        share = cv2.resize((mask == class_id).astype(np.float32), size, interpolation=cv2.INTER_AREA)
+        better = share > best_share
+        best_share[better] = share[better]
+        labels[better] = class_id
+    return labels
+
+
 def rescale(image: np.ndarray, fx: float, fy: float, is_mask: bool = False) -> np.ndarray:
-    """Rescale by (fx, fy). Masks use nearest neighbour so class IDs are never blended."""
+    """Rescale by (fx, fy). Masks are resized by area vote so class IDs are never blended."""
     if fx == 1.0 and fy == 1.0:
         return image
     h, w = image.shape[:2]
     size = (max(1, round(w * fx)), max(1, round(h * fy)))
     if is_mask:
-        interp = cv2.INTER_NEAREST
-    elif fx <= 1.0 and fy <= 1.0:
+        return _rescale_mask(image, size, fx, fy)
+    if fx <= 1.0 and fy <= 1.0:
         interp = cv2.INTER_AREA
     else:
         interp = cv2.INTER_LINEAR
@@ -527,7 +550,8 @@ def preprocess_dataset(
         mask_name = ""
         if mask is not None:
             mask_name = f"{Path(out_name).stem}.png"
-            resized_mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
+            mh, mw = mask.shape[:2]
+            resized_mask = _rescale_mask(mask, (width, height), width / mw, height / mh)
             if not cv2.imwrite(str(mask_out_dir / mask_name), resized_mask):
                 counts["write_failures"] += 1
                 print(f"[error] Could not write mask: {mask_name}")

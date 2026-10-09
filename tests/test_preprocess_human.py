@@ -222,3 +222,34 @@ def test_16bit_mask_out_of_range_rejected(tmp_path):
 def test_cli_rejects_non_finite_scale(tmp_path, bad):
     res = _cli("--input-dir", str(tmp_path), "--scale", bad)
     assert res.returncode == 2
+
+
+def test_mask_downscale_takes_majority_class_not_top_left():
+    # 4x4 footprints at scale 0.25: column 0 is class 1, columns 1-3 are class 2.
+    # Nearest neighbour would copy the top-left pixel (class 1); the image average is mostly class 2.
+    block = np.array([[1, 2, 2, 2]] * 4, dtype=np.uint8)
+    mask = np.tile(block, (3, 5))
+    out = pp.rescale(mask, 0.25, 0.25, is_mask=True)
+    assert out.shape == (3, 5)
+    assert (out == 2).all()
+
+
+def test_mask_downscale_matches_brute_force_majority():
+    # At scale 1/3 each output pixel covers exactly a 3x3 block, so the majority can be counted.
+    rng = np.random.default_rng(3)
+    mask = rng.choice(np.array([0, 1, 2, 4], np.uint8), size=(30, 45))
+    out = pp.rescale(mask, 1 / 3, 1 / 3, is_mask=True)
+    assert out.shape == (10, 15)
+    for i in range(10):
+        for j in range(15):
+            ids, counts = np.unique(mask[3 * i : 3 * i + 3, 3 * j : 3 * j + 3], return_counts=True)
+            assert out[i, j] == ids[np.argmax(counts)]  # np.unique sorts, so ties go to the lower ID
+
+
+def test_resize_mode_mask_uses_area_vote(tmp_path):
+    img_dir, mask_dir, _, _ = make_sample(tmp_path)
+    out = tmp_path / "out"
+    run(img_dir, out, mask_dir=mask_dir, export_tiles=False)
+    m = cv2.imread(str(out / "masks" / "slide_processed.png"), cv2.IMREAD_UNCHANGED)
+    assert m.shape == (TILE_H, TILE_W)
+    assert set(np.unique(m)) <= {0, 1, 2, 4}
