@@ -1,10 +1,14 @@
 paths:
-  train_csv: "data/rat_original/train.csv"
-  weights_in: "models/V2_best_model.keras"
   output_dir: "outputs"
 
-inference:
+
+# PLACEHOLDERS: update once data is uploaded to HPG
+data_paths:   # relative to $TOAD_DATA_ROOT
+  train_csv: "rat_original/train.csv"
+  weights_in: "models/V2_best_model.keras"
   input_dir: "seko_storage/test/images"
+
+device: auto
 
 data:
   img_height: 192

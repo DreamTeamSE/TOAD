@@ -10,17 +10,16 @@ import os
 import glob
 import cv2
 import numpy as np
-import yaml
+from config import load_config
 
 CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "configs", "baseline.yml"
 )
 
-with open(CONFIG_PATH, "r") as f:
-    cfg = yaml.safe_load(f)
+cfg = load_config(CONFIG_PATH)
 
-model_path = cfg["paths"]["weights_in"]
-input_directory = cfg["inference"]["input_dir"]
+model_path = str(cfg["data_paths"]["weights_in"])
+input_directory = cfg["data_paths"]["input_dir"]
 output_directory = cfg["paths"]["output_dir"]
 
 IMG_HEIGHT = cfg["data"]["img_height"]
