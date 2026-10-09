@@ -50,6 +50,28 @@ python src/forward_pass.py \
   --output "/path/to/output_mask.png"
 ```
 
+## Human Data Preprocessing
+
+```bash
+# 1. Find the pixel size the rat model was trained at (original rat scans, squashed to 256x192)
+python src/inspect_resolution.py /path/to/rat_original_scans --resize-to 256x192
+
+# 2. Check the human scans' pixel size
+python src/inspect_resolution.py /path/to/human_tiffs --csv outputs/human_mpp.csv
+
+# 3. Tile human images at the rat scale (add --mask-dir if you have label masks)
+python src/preprocess_human_data.py \
+  --input-dir /path/to/human_tiffs --output-dir outputs/human_none \
+  --source-mpp auto --target-mpp <rat um/px> --stain-norm none
+```
+
+`--stain-norm none|reinhard` (default `none`) is available on `preprocess_human_data.py`,
+`forward_pass.py`, `predict.py`, and via `SEKO_STAIN_NORM` in `train.py`, so rat and human
+data can be run under the same setting. `src/compare_predictions.py` compares two prediction
+folders (e.g. none vs reinhard), with Dice when ground-truth masks are given.
+
+Tests: `pytest` from the project root.
+
 ## Project Status
 
 | Area                     | Status          |
