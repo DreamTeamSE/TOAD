@@ -17,6 +17,7 @@ predictions/
 nnUNet_raw/
 nnUNet_preprocessed/
 nnUNet_results/
+nnunet_selftest_output/
 
 # OS / editor
 .DS_Store
