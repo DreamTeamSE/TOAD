@@ -21,9 +21,9 @@ TOAD/
 
 ## Branching
 
-- `dev` is the main branch. Branch off it for all work.
-- One feature branch per person, e.g. `feature/nnunet-baseline`.
-- Merge back to `dev` through a pull request with review.
+- `dev` is the main branch. All work branches off it.
+- Until you're added as a collaborator, fork the repo and work on a branch in your fork, e.g. `feature/nnunet-baseline`.
+- Open a pull request into `dev` on DreamTeamSE/TOAD for review.
 - `feature/sam-3` is frozen until Step 3. Do not branch off it.
 
 ## Environment
