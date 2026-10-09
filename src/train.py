@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# WARNING: NOT MAINTAINED. Known bug: multi_unet_model() calls model.compile()
+# before `model` is defined, so it will crash (UnboundLocalError) if training is
+# re-enabled. Fix that before using this script to train.
 """
 Created on Mon Mar 18 14:55:00 2024
 

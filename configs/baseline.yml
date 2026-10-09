@@ -4,7 +4,9 @@ paths:
 
 # PLACEHOLDERS: update once data is uploaded to HPG
 data_paths:   # relative to $TOAD_DATA_ROOT
+  rat_root: "rat_original"
   train_csv: "rat_original/train.csv"
+  test_csv: "rat_original/test.csv"
   weights_in: "models/V2_best_model.keras"
   input_dir: "seko_storage/test/images"
 
@@ -13,3 +15,17 @@ device: auto
 data:
   img_height: 192
   img_width: 256
+
+# Folder layout under data_paths.rat_root, used by src/utils/build_train_csv.py
+rat_dataset:
+  species: "rat"
+  labelled_dir: "Labelled_images"
+  input_dir: "Input_images"
+  stains:   # labelled: subdir of labelled_dir, input: subdir of input_dir
+    - {stain: "HE",     labelled: "H&E",    input: "H&E/Raw256x192"}
+    - {stain: "SafO",   labelled: "Safo",   input: "SafO/Raw 256x192"}
+    - {stain: "TolBlu", labelled: "TolBlu", input: "TolBlu/Raw 256x192"}
+  test:     # flat folder with mixed stains, so rows get a single stain label
+    masks: "Testing_images/Masks"
+    inputs: "Testing_images/Inputs"
+    stain: "mixed"
