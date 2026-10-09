@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-# WARNING: NOT MAINTAINED. Known bug: multi_unet_model() calls model.compile()
-# before `model` is defined, so it will crash (UnboundLocalError) if training is
-# re-enabled. Fix that before using this script to train.
+# WARNING: NOT MAINTAINED. Training is commented out; re-check before re-enabling.
 """
 Created on Mon Mar 18 14:55:00 2024
 
@@ -80,7 +78,6 @@ def multi_unet_model(n_classes=5, IMG_HEIGHT=192, IMG_WIDTH=256, IMG_CHANNELS=3)
     c9 = Conv2D(16, (3, 3), activation='relu', kernel_initializer='he_normal', padding='same')(c9)
     
     #NOTE: Compile the model in the main program to make it easy to test with various loss functions
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     
     #model.summary()
     
