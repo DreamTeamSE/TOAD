@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=nnunet-prep
-#SBATCH --account=REPLACE_WITH_GROUP
-#SBATCH --qos=REPLACE_WITH_GROUP
+#SBATCH --account=dream_team
+#SBATCH --qos=dream_team
 #SBATCH --partition=hpg-default
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

@@ -15,7 +15,7 @@ set -euo pipefail
 
 ENV_NAME="nnunet"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DATA_ROOT="${DATA_ROOT:-/blue/REPLACE_WITH_GROUP/$USER/seko_storage}"   # <-- EDIT ME (or export before running)
+DATA_ROOT="${DATA_ROOT:-/blue/dream_team/$USER/seko_storage}"   # <-- EDIT ME (or export before running)
 
 echo "Repo root   : $REPO_ROOT"
 echo "Data root   : $DATA_ROOT"

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=nnunet-train
-#SBATCH --account=REPLACE_WITH_GROUP
-#SBATCH --qos=REPLACE_WITH_GROUP
+#SBATCH --account=dream_team
+#SBATCH --qos=dream_team
 #SBATCH --partition=gpu
 #SBATCH --gpus=a100:1
 #SBATCH --nodes=1
