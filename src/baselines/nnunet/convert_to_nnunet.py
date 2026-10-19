@@ -20,17 +20,22 @@ LIMITATIONS:
   - Developed/tested only against synthetic fixtures (--selftest) — real rat
     data lives on HiPerGator, not yet reachable. This proves the conversion
     logic is correct; it doesn't prove real filenames/images behave the same.
-  - The real Testing_images/ + osteophyte_relabelled_masks/ layout is assumed
-    (reuses pair_stain's stem-matching), not confirmed.
+  - The Testing_images/ layout is (Testing_images/Inputs +
+    Testing_images/Masks, per configs/baseline.yml's rat_dataset.test) and
+    used as the default, but real data itself still hasn't been run through
+    this script.
   - Once HPG access lands: validate against real data, and always run
     `nnUNetv2_plan_and_preprocess -d XXX --verify_dataset_integrity`.
   - macOS local dev only: --selftest may need KMP_DUPLICATE_LIB_OK=TRUE set
     (libomp conflict, doesn't occur on HPG's Linux env — don't add it there).
 
+Matching logic and label handling are imported from the team's shared
+modules: src/utils/build_train_csv.py and src/labels.py.
+
 Usage:
     python src/baselines/nnunet/convert_to_nnunet.py --selftest
     python src/baselines/nnunet/convert_to_nnunet.py \\
-        --data-root /path/to/rat_original --dataset-id 1 --dataset-name Rat
+        --dataset-id 1 --dataset-name Rat   # reads configs/baseline.yml; needs $TOAD_DATA_ROOT
     python src/baselines/nnunet/convert_to_nnunet.py --spotcheck /path/to/DatasetXXX_Rat
 """
 
@@ -40,110 +45,31 @@ import json
 import os
 import re
 import sys
-from collections import defaultdict
+from pathlib import Path
 
 import cv2
 import numpy as np
 
-# Stain subfolders (matches build_train_csv.py on feature/sam-3).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # -> src/, for config/labels/utils
+from config import load_config  # noqa: E402
+from labels import CLASS_NAMES, merge_osteophyte, validate_mask  # noqa: E402
+from utils.build_train_csv import mask_stem, pair_stain  # noqa: E402
+
+CONFIG_PATH = "configs/baseline.yml"
+
+# Fallback stain config, used only by --selftest (which deliberately doesn't
+# depend on configs/baseline.yml / $TOAD_DATA_ROOT). Real runs read this from
+# configs/baseline.yml's rat_dataset section instead. See main().
 DEFAULT_STAIN_CONFIG = [
     ("H&E", "H&E/Raw256x192", "HE"),
     ("Safo", "SafO/Raw 256x192", "SafO"),
     ("TolBlu", "TolBlu/Raw 256x192", "TolBlu"),
 ]
 
-# DATA_CONTRACT's 0-4 scheme. Osteophyte (raw label 5) is merged into
-# cartilage, so there's no separate "osteophyte" key.
-DATA_CONTRACT_LABELS = {
-    "background": 0,
-    "bone": 1,
-    "cartilage": 2,
-    "growth_plate": 3,
-    "marrow": 4,
-}
+# DATA_CONTRACT's 0-4 scheme, derived from labels.py.
+DATA_CONTRACT_LABELS = {name: cid for cid, name in CLASS_NAMES.items()}
 
 DEFAULT_FILE_ENDING = ".png"
-
-
-# ───────────────────────────── matching ─────────────────────────────
-# Ported from build_train_csv.py (feature/sam-3)
-
-def mask_stem(filename: str) -> str:
-    """Strip _bone.tif / _bone_binary.tif suffix."""
-    return re.sub(r'(_bone_binary|_bone)\.tif$', '', filename)
-
-
-def image_stem(filename: str) -> str:
-    """Strip ,_resized_gray.tif / _resized_gray.tif / plain .tif suffix."""
-    s = re.sub(r',?_resized_gray\.tif$', '', filename)
-    if s == filename:  # no resized_gray suffix
-        s = re.sub(r'\.tif$', '', filename)  # fall back to stripping plain .tif
-    return s
-
-
-def suffix_token(stem: str) -> str:
-    """
-    Last alphanumeric token after splitting on [-_\\s]+.
-    e.g. 'GALIDO_TOL_BLUE_06r' -> '06r'
-         'Gal-IDO_Tol-Blue_06r' -> '06r'
-    """
-    tokens = re.split(r'[-_\s]+', stem.lower())
-    return tokens[-1] if tokens else stem.lower()
-
-
-def pair_stain(labelled_dir: str, input_dir: str, stain: str, ext: str = ".tif"):
-    """
-    Match masks to images for one stain. Tries exact-stem match first, then
-    falls back to an unambiguous suffix-token match (tokens shared by 2+
-    images are excluded, not guessed). Returns (pairs, unmatched_mask_paths).
-    """
-    if not os.path.isdir(labelled_dir) or not os.path.isdir(input_dir):
-        return [], []
-
-    masks = sorted(
-        os.path.join(labelled_dir, f)
-        for f in os.listdir(labelled_dir)
-        if f.lower().endswith(ext)
-    )
-    images = sorted(
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.lower().endswith(ext)
-    )
-
-    img_by_exact = {image_stem(os.path.basename(f)): f for f in images}
-
-    img_by_suffix_raw = defaultdict(list)
-    for f in images:
-        img_by_suffix_raw[suffix_token(image_stem(os.path.basename(f)))].append(f)
-    img_by_suffix = {k: v[0] for k, v in img_by_suffix_raw.items() if len(v) == 1}
-
-    pairs, unmatched = [], []
-    for mpath in masks:
-        mname = os.path.basename(mpath)
-        mstem = mask_stem(mname)
-        mtoken = suffix_token(mstem)
-
-        if mstem in img_by_exact:
-            pairs.append((img_by_exact[mstem], mpath, stain))
-        elif mtoken in img_by_suffix:
-            pairs.append((img_by_suffix[mtoken], mpath, stain))
-        else:
-            unmatched.append(mpath)
-
-    return pairs, unmatched
-
-
-# ───────────────────────────── label remap ─────────────────────────────
-# Vectorized rewrite of osteophyte_label_change.py's nested-loop version.
-
-def remap_osteophyte_to_cartilage(mask: np.ndarray, raw_label: int = 5, target_label: int = 2) -> np.ndarray:
-    unexpected = set(np.unique(mask).tolist()) - {0, 1, 2, 3, 4, 5}
-    if unexpected:
-        print(f"[WARN] mask contains unexpected label value(s): {sorted(unexpected)}", file=sys.stderr)
-    out = mask.copy()
-    out[mask == raw_label] = target_label
-    return out
 
 
 # ───────────────────────────── RGB split ─────────────────────────────
@@ -191,7 +117,8 @@ def write_label_case(case_id: str, mask_path: str, labels_out_dir: str, file_end
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
     if mask is None:
         raise IOError(f"Could not read mask: {mask_path}")
-    remapped = remap_osteophyte_to_cartilage(mask)
+    remapped = merge_osteophyte(mask)
+    validate_mask(remapped)  # raises if anything outside the 0-4 DATA_CONTRACT scheme survived
     out_path = os.path.join(labels_out_dir, f"{case_id}{file_ending}")
     cv2.imwrite(out_path, remapped)
     return remapped
@@ -222,8 +149,11 @@ def convert(
     dataset_id: int = 1,
     dataset_name: str = "Rat",
     stain_config=DEFAULT_STAIN_CONFIG,
+    labelled_base: str = "Labelled_images",
+    input_base: str = "Input_images",
     test_images_dir: str | None = None,
     test_masks_dir: str | None = None,
+    test_stain: str = "Test",
     include_test_labels: bool = False,
     manifest_csv: str | None = None,
     overwrite: bool = False,
@@ -245,8 +175,8 @@ def convert(
 
     all_pairs, all_unmatched = [], []
     for labelled_sub, input_sub, stain in stain_config:
-        labelled_dir = os.path.join(data_root, "Labelled_images", labelled_sub)
-        input_dir = os.path.join(data_root, "Input_images", input_sub)
+        labelled_dir = os.path.join(data_root, labelled_base, labelled_sub)
+        input_dir = os.path.join(data_root, input_base, input_sub)
         pairs, unmatched = pair_stain(labelled_dir, input_dir, stain)
         all_pairs.extend(pairs)
         all_unmatched.extend(unmatched)
@@ -265,7 +195,7 @@ def convert(
         os.makedirs(images_ts, exist_ok=True)
         if include_test_labels:
             os.makedirs(labels_ts, exist_ok=True)
-        test_pairs, test_unmatched = pair_stain(test_masks_dir, test_images_dir, "Test")
+        test_pairs, test_unmatched = pair_stain(test_masks_dir, test_images_dir, test_stain)
         all_unmatched.extend(test_unmatched)
         for i, (image_path, mask_path, stain) in enumerate(test_pairs):
             stem = mask_stem(os.path.basename(mask_path))
@@ -292,9 +222,8 @@ def convert(
             print(f"  {p}")
 
     print(
-        "\nLIMITATIONS: not validated against real rat data (HPG access pending) -- run "
-        "`nnUNetv2_plan_and_preprocess -d <id> --verify_dataset_integrity` before trusting "
-        "this, and re-run spot_check_dataset() once real data is reachable."
+        "\nLIMITATIONS: run `nnUNetv2_plan_and_preprocess -d <id> --verify_dataset_integrity` "
+        "before trusting this, and spot_check_dataset() a sample by eye."
     )
 
     return {
@@ -380,8 +309,8 @@ def build_selftest_fixtures(root: str) -> dict:
         "he_input": os.path.join(data_root, "Input_images", "H&E", "Raw256x192"),
         "tb_labelled": os.path.join(data_root, "Labelled_images", "TolBlu"),
         "tb_input": os.path.join(data_root, "Input_images", "TolBlu", "Raw 256x192"),
-        "test_images": os.path.join(data_root, "Testing_images"),
-        "test_masks": os.path.join(data_root, "osteophyte_relabelled_masks"),
+        "test_images": os.path.join(data_root, "Testing_images", "Inputs"),
+        "test_masks": os.path.join(data_root, "Testing_images", "Masks"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -542,8 +471,8 @@ def run_selftest(selftest_dir: str = "nnunet_selftest_output") -> bool:
     print(f"Previews for manual eyeballing: {os.path.abspath(preview_dir)}")
     print(
         "\nLIMITATIONS: synthetic fixtures only -- doesn't validate real filename mess beyond "
-        "the two recreated cases, real image dimensions/stain colors, or the real "
-        "Testing_images/ layout (assumed, not confirmed). Real-data validation still required."
+        "the two recreated cases, or real image dimensions/stain colors. Real-data validation "
+        "still required."
     )
 
     return passed == total
@@ -553,7 +482,8 @@ def run_selftest(selftest_dir: str = "nnunet_selftest_output") -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Convert TOAD rat data to nnU-Net dataset format")
-    parser.add_argument("--data-root", help="Path to rat_original/ directory")
+    parser.add_argument("--config", default=CONFIG_PATH, help="Path to a TOAD config (default: configs/baseline.yml)")
+    parser.add_argument("--data-root", help="Path to rat_original/ directory (default: config's data_paths.rat_root)")
     parser.add_argument("--nnunet-raw", help="Override for $nnUNet_raw (else read from environment)")
     parser.add_argument("--dataset-id", type=int, default=1)
     parser.add_argument("--dataset-name", default="Rat")
@@ -577,12 +507,44 @@ def main():
         spot_check_dataset(args.spotcheck, n_samples=args.n_spotcheck, seed=args.seed)
         return
 
-    nnunet_raw = args.nnunet_raw or os.environ.get("nnUNet_raw")
-    if not args.data_root or not nnunet_raw:
-        parser.error("--data-root and --nnunet-raw (or $nnUNet_raw) are required unless --selftest/--spotcheck")
+    # Prefer configs/baseline.yml's rat_dataset section (requires $TOAD_DATA_ROOT)
+    # for stain folders + the real Testing_images/ layout; fall back to
+    # DEFAULT_STAIN_CONFIG + a best-guess test layout if config loading fails
+    # (e.g. running against an arbitrary folder with --data-root, no TOAD setup).
+    rat_dataset = None
+    config_data_root = None
+    try:
+        cfg = load_config(args.config)
+        rat_dataset = cfg.get("rat_dataset")
+        if cfg.get("data_paths", {}).get("rat_root"):
+            config_data_root = str(cfg["data_paths"]["rat_root"])
+    except Exception as e:
+        print(f"[WARN] could not load {args.config} ({e}) -- falling back to defaults", file=sys.stderr)
 
-    test_images_dir = args.test_images_dir or os.path.join(args.data_root, "Testing_images")
-    test_masks_dir = args.test_masks_dir or os.path.join(args.data_root, "osteophyte_relabelled_masks")
+    data_root = args.data_root or config_data_root
+    nnunet_raw = args.nnunet_raw or os.environ.get("nnUNet_raw")
+    if not data_root or not nnunet_raw:
+        parser.error(
+            "--data-root (or a loadable config's data_paths.rat_root) and "
+            "--nnunet-raw (or $nnUNet_raw) are required unless --selftest/--spotcheck"
+        )
+
+    if rat_dataset:
+        stain_config = [(e["labelled"], e["input"], e["stain"]) for e in rat_dataset["stains"]]
+        labelled_base = rat_dataset.get("labelled_dir", "Labelled_images")
+        input_base = rat_dataset.get("input_dir", "Input_images")
+        test_cfg = rat_dataset.get("test", {})
+        test_images_dir = args.test_images_dir or os.path.join(data_root, test_cfg["inputs"])
+        test_masks_dir = args.test_masks_dir or os.path.join(data_root, test_cfg["masks"])
+        test_stain = test_cfg.get("stain", "Test")
+    else:
+        stain_config = DEFAULT_STAIN_CONFIG
+        labelled_base = "Labelled_images"
+        input_base = "Input_images"
+        test_images_dir = args.test_images_dir or os.path.join(data_root, "Testing_images", "Inputs")
+        test_masks_dir = args.test_masks_dir or os.path.join(data_root, "Testing_images", "Masks")
+        test_stain = "Test"
+
     if not (os.path.isdir(test_images_dir) and os.path.isdir(test_masks_dir)):
         print(f"[WARN] test split dirs not found ({test_images_dir}, {test_masks_dir}) -- skipping imagesTs", file=sys.stderr)
         test_images_dir = test_masks_dir = None
@@ -592,12 +554,16 @@ def main():
     )
 
     convert(
-        data_root=args.data_root,
+        data_root=data_root,
         nnunet_raw=nnunet_raw,
         dataset_id=args.dataset_id,
         dataset_name=args.dataset_name,
+        stain_config=stain_config,
+        labelled_base=labelled_base,
+        input_base=input_base,
         test_images_dir=test_images_dir,
         test_masks_dir=test_masks_dir,
+        test_stain=test_stain,
         include_test_labels=args.include_test_labels,
         manifest_csv=manifest_csv,
         overwrite=args.overwrite,
