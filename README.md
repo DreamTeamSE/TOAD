@@ -35,7 +35,7 @@ conda env create -f environment.yml
 conda activate seko
 ```
 
-Some components (e.g. nnU-Net) use their own environments. See the README in their directory.
+Some components (e.g. nnU-Net) use their own environments. See the [nnU-Net baseline README](hpg/nnunet/README.md).
 
 ## Running Inference (SEKO, Single Image)
 
