@@ -44,10 +44,52 @@
 #                        is available/necessary depends on your group's actual
 #                        HPG allocation — unconfirmed pending HPG account access.
 #
-# Resolution: submit once with --epochs 1 and a short --time (e.g. 00:30:00),
-# read the real per-epoch wall-clock time + peak CPU/memory usage nnU-Net
-# reports in logs/%x_%j.out, then size the real run's flags from measured
-# numbers instead of this borrowed starting point.
+# Resolution: submit once with a quick-epoch trainer variant and a short
+# --time, read the real per-epoch wall-clock time + peak CPU/memory usage
+# nnU-Net reports in logs/%x_%j.out, then size the real run's flags from
+# measured numbers instead of this borrowed starting point.
+#
+# TRAINER/FOLD are overridable so this one script covers both the mandatory
+# smoke test and the full run:
+#   sbatch --time=00:30:00 --export=TRAINER=nnUNetTrainer_1epoch hpg/nnunet/train_nnunet.slurm   # smoke test
+#   sbatch hpg/nnunet/train_nnunet.slurm                                                          # full run (default trainer, 1000 epochs)
+#
+# Requires prepare_data.slurm to have already run successfully (reads
+# $nnUNet_preprocessed/Dataset001_Rat/, does not touch $TOAD_DATA_ROOT).
 
-echo "train_nnunet.slurm scaffold stub" >&2
-exit 1
+set -euo pipefail
+
+DATASET_ID=1
+DATASET_NAME=Rat
+DATASET_DIR_NAME="Dataset$(printf '%03d' "$DATASET_ID")_${DATASET_NAME}"
+CONFIGURATION=2d
+FOLD="${FOLD:-0}"
+TRAINER="${TRAINER:-nnUNetTrainer}"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DATA_ROOT="${DATA_ROOT:-/blue/dream_team/$USER/seko_storage}"  # must match prepare_data.slurm's DATA_ROOT -- that's where nnUNet_preprocessed was populated
+mkdir -p "$REPO_ROOT/logs"
+
+export nnUNet_raw="$DATA_ROOT/nnUNet_raw"
+export nnUNet_preprocessed="$DATA_ROOT/nnUNet_preprocessed"
+export nnUNet_results="$DATA_ROOT/nnUNet_results"
+
+module load conda
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate nnunet
+
+cd "$REPO_ROOT"
+
+echo "Dataset             : $DATASET_DIR_NAME"
+echo "Configuration       : $CONFIGURATION"
+echo "Fold                : $FOLD"
+echo "Trainer             : $TRAINER"
+echo "nnUNet_preprocessed : $nnUNet_preprocessed"
+echo "nnUNet_results      : $nnUNet_results"
+echo
+
+echo "=== Training ==="
+nnUNetv2_train "$DATASET_ID" "$CONFIGURATION" "$FOLD" -tr "$TRAINER"
+
+echo
+echo "Done. Checkpoint + logs under \$nnUNet_results/$DATASET_DIR_NAME/${TRAINER}__nnUNetPlans__${CONFIGURATION}/fold_${FOLD}/"
