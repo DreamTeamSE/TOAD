@@ -44,6 +44,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -164,11 +165,13 @@ def convert(
     images_ts = os.path.join(dataset_dir, "imagesTs")
     labels_ts = os.path.join(dataset_dir, "labelsTs")
 
-    if os.path.isdir(dataset_dir) and os.listdir(dataset_dir) and not overwrite:
-        raise FileExistsError(
-            f"{dataset_dir} already exists and is non-empty. "
-            "Pass overwrite=True to re-run into it anyway."
-        )
+    if os.path.isdir(dataset_dir) and os.listdir(dataset_dir):
+        if not overwrite:
+            raise FileExistsError(
+                f"{dataset_dir} already exists and is non-empty. "
+                "Pass overwrite=True to re-run into it anyway."
+            )
+        shutil.rmtree(dataset_dir)
 
     os.makedirs(images_tr, exist_ok=True)
     os.makedirs(labels_tr, exist_ok=True)
@@ -457,6 +460,25 @@ def run_selftest(selftest_dir: str = "nnunet_selftest_output") -> bool:
     test_stems = {k for k, v in manifest_by_stem.items() if v["split"] == "test"}
     checks.append(("test split: one case written", len(test_stems) == 1, f"got {len(test_stems)}"))
     checks.append(("test split: imagesTs populated", os.path.isdir(os.path.join(dataset_dir, "imagesTs")) and len(os.listdir(os.path.join(dataset_dir, "imagesTs"))) > 0, ""))
+
+    # --- Regression test: --overwrite must actually clear stale files from a
+    # prior run with a different match count, not just permit writing over it.
+    reduced_result = convert(
+        data_root=fixtures["data_root"],
+        nnunet_raw=nnunet_raw_fixture,
+        dataset_id=999,
+        dataset_name="SelfTest",
+        stain_config=stain_config[:1],  # HE only -- drops TolBlu's cases
+        include_test_labels=True,
+        manifest_csv=manifest_csv,
+        overwrite=True,
+    )
+    remaining_images = os.listdir(images_tr)
+    checks.append((
+        "overwrite actually clears stale files from a prior larger run",
+        len(remaining_images) == reduced_result["num_train"] * 3,  # 3 channel files per case
+        f"expected {reduced_result['num_train'] * 3} image files, found {len(remaining_images)}",
+    ))
 
     # --- Report ---
     passed = sum(1 for _, ok, _ in checks if ok)
