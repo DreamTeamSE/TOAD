@@ -31,7 +31,7 @@ DATASET_ID=1
 DATASET_NAME=Rat
 DATASET_DIR_NAME="Dataset$(printf '%03d' "$DATASET_ID")_${DATASET_NAME}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 DATA_ROOT="${DATA_ROOT:-/blue/dream_team/$USER/seko_storage}"  # nnU-Net's own working dir, separate from TOAD_DATA_ROOT (the raw input data)
 mkdir -p "$REPO_ROOT/logs"
 

@@ -66,7 +66,7 @@ CONFIGURATION=2d
 FOLD="${FOLD:-0}"
 TRAINER="${TRAINER:-nnUNetTrainer}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 DATA_ROOT="${DATA_ROOT:-/blue/dream_team/$USER/seko_storage}"  # must match prepare_data.slurm's DATA_ROOT -- that's where nnUNet_preprocessed was populated
 mkdir -p "$REPO_ROOT/logs"
 
