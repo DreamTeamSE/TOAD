@@ -7,8 +7,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64gb
-#SBATCH --time=24:00:00
+#SBATCH --mem=32gb
+#SBATCH --time=30:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
@@ -18,36 +18,24 @@
 # submission should use a short --time + reduced epochs as a smoke test,
 # then size a real run's --time from the observed per-epoch cost.
 #
-# Resource allocation above was copied from feature/sam-3's train_sam3.slurm
-# as a starting point (matches the established HPG convention), NOT derived
-# from nnU-Net's actual resource profile. Known mismatches to revisit once a
-# real smoke test can be run:
-#   --cpus-per-task=8 : sized for SAM-3's DataLoader(num_workers=2). nnU-Net
-#                        leans much more heavily on CPU-side work — it runs
-#                        real-time data augmentation (elastic deform, rotate,
-#                        scale, gamma jitter) via batchgenerators in parallel
-#                        background worker processes to keep the GPU fed, and
-#                        typically wants more worker processes than this.
-#                        Likely too low — bump up once smoke-tested.
-#   --mem=64gb         : likely generous, not tight. nnU-Net's memory appetite
-#                        scales with patch/volume size; nnU-Net is usually
-#                        benchmarked on much larger 3D CT/MRI volumes, while
-#                        our 2D histology patches are small (comparable to
-#                        SEKO's 192x256 inputs). Safe to over-ask, but not a
-#                        measured number.
-#   --time=24:00:00    : likely generous, not tight, for the same reason (small
-#                        2D images, a few hundred training images, single
-#                        fold). Still a placeholder, not a measurement — do
-#                        not trust it without a smoke test first.
-#   --gpus=a100:1      : single GPU is correct (nnU-Net single-fold 2D config
-#                        doesn't need multi-GPU), but whether A100 specifically
-#                        is available/necessary depends on your group's actual
-#                        HPG allocation — unconfirmed pending HPG account access.
+# Resource allocation below is sized from a real smoke test (job 46886051,
+# nnUNetTrainer_1epoch, --partition=hpg-turin --gpus=l4:1, 2026-10-20):
+#   --cpus-per-task=8 : measured avg CPU utilization was only ~20%, well
+#                        within 8 cores for this dataset's small 2D patches.
+#   --mem=32gb         : measured peak RSS was ~16.9GB; 32gb keeps ~2x headroom.
+#   --time=30:00:00    : measured epoch time was 77.92s; 1000 epochs ≈ 21.7h,
+#                        plus ~1min startup and ~13s final validation. 30h
+#                        gives buffer against cluster variance. Check the
+#                        partition's actual max walltime
+#                        (`sinfo -p hpg-turin -o "%l"`) before relying on this.
+#   --gpus=a100:1      : placeholder — no A100s exist on this cluster. See
+#                        the open GPU item in the project plan (pending
+#                        confirmation from Ani) for why this isn't committed
+#                        here yet; the smoke test used a submit-time
+#                        override (--partition=hpg-turin --gpus=l4:1).
 #
-# Resolution: submit once with a quick-epoch trainer variant and a short
-# --time, read the real per-epoch wall-clock time + peak CPU/memory usage
-# nnU-Net reports in logs/%x_%j.out, then size the real run's flags from
-# measured numbers instead of this borrowed starting point.
+# No CUDA OOM: batch_size=14 @ patch_size (192,256) fit comfortably in the
+# L4's 24GB VRAM.
 #
 # TRAINER/FOLD are overridable so this one script covers both the mandatory
 # smoke test and the full run:
