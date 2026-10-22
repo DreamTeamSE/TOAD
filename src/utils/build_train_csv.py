@@ -52,7 +52,10 @@ def image_stem(filename: str) -> str:
     s = re.sub(r',?_resized_gray\.tif$', '', filename)
     if s == filename:                       # no resized_gray suffix
         s = re.sub(r'\.tif$', '', filename) # fall back to stripping plain .tif
-    return s
+    # Some real Testing_images/Inputs filenames have a stray leading (and/or
+    # trailing) comma, e.g. ",Aging_H&E_029,_resized_gray.tif" -> leaves a
+    # leading comma behind after the suffix strip above.
+    return s.strip(',')
 
 
 def suffix_token(stem: str) -> str:
