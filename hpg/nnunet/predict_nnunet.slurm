@@ -2,8 +2,8 @@
 #SBATCH --job-name=nnunet-predict
 #SBATCH --account=dream_team
 #SBATCH --qos=dream_team
-#SBATCH --partition=gpu
-#SBATCH --gpus=a100:1
+#SBATCH --partition=hpg-turin
+#SBATCH --gpus=l4:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -17,15 +17,13 @@
 # output into the exact docs/DATA_CONTRACT.md format (single-channel 8-bit
 # PNG, class IDs 0-4, filename stem matching the input).
 #
-# GPU header is still a placeholder. Submit with an override until the real 
-# values are confirmed, e.g.:
-#   sbatch --partition=hpg-turin --gpus=l4:1 --export=CHECKPOINT=/path/to/checkpoint_final.pth hpg/nnunet/predict_nnunet.slurm
-#
 # CHECKPOINT selects which trained weights to predict with. Point this at the
-# smoke-test checkpoint first. Re-run against the full run's checkpoint once that's ready, for
-# the actual deliverable-quality predictions. Example paths:
-#   $nnUNet_results/Dataset001_Rat/nnUNetTrainer_1epoch__nnUNetPlans__2d/fold_0/checkpoint_final.pth   (smoke test)
-#   $nnUNet_results/Dataset001_Rat/nnUNetTrainer__nnUNetPlans__2d/fold_0/checkpoint_final.pth           (full run)
+# smoke-test checkpoint first. Re-run against the real run's checkpoint once
+# that's ready, for the actual deliverable-quality predictions. Example
+# usage and paths:
+#   sbatch --export=CHECKPOINT=/path/to/checkpoint_final.pth hpg/nnunet/predict_nnunet.slurm
+#   $nnUNet_results/Dataset001_Rat/nnUNetTrainer_1epoch__nnUNetPlans__2d/fold_0/checkpoint_final.pth     (smoke test)
+#   $nnUNet_results/Dataset001_Rat/nnUNetTrainer_250epochs__nnUNetPlans__2d/fold_0/checkpoint_final.pth  (real run)
 
 set -euo pipefail
 
