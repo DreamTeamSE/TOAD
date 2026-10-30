@@ -15,10 +15,21 @@ from keras.models import load_model
 
 # Reusable visualization helpers
 from visualize_mask import save_grayscale, overlay_mask
+from stain_norm import add_stain_norm_args, apply_stain_norm, check_stain_args, reference_from_args
 
 
-def load_and_preprocess_image(image_path: str, height: int, width: int, rgb: bool) -> tuple[np.ndarray, np.ndarray]:
+def load_and_preprocess_image(
+    image_path: str,
+    height: int,
+    width: int,
+    rgb: bool,
+    stain_norm: str = "none",
+    ref_means=None,
+    ref_stds=None,
+) -> tuple[np.ndarray, np.ndarray]:
     """
+    Stain normalization (if any) runs on the full image, before the resize.
+
     Returns:
       x: (1, H, W, 3) float32 in [0,1] for model input
       img_rgb: (H, W, 3) uint8 RGB for visualization/overlay
@@ -28,6 +39,8 @@ def load_and_preprocess_image(image_path: str, height: int, width: int, rgb: boo
         raise ValueError(f"Could not read image: {image_path}")
     if img_bgr.ndim != 3 or img_bgr.shape[2] != 3:
         raise ValueError(f"Image must be 3-channel (got shape {img_bgr.shape})")
+
+    img_bgr = apply_stain_norm(img_bgr, stain_norm, ref_means=ref_means, ref_stds=ref_stds)
 
     if img_bgr.shape[:2] != (height, width):
         img_bgr = cv2.resize(img_bgr, (width, height))
@@ -50,12 +63,17 @@ def forward_pass_single_image(
     rgb: bool,
     alpha: float,
     background_class: int,
+    stain_norm: str = "none",
+    ref_means=None,
+    ref_stds=None,
 ):
     print(f"Loading model: {model_path}")
     model = load_model(model_path, compile=False)
 
-    print(f"Preprocessing image: {image_path}")
-    x, img_rgb = load_and_preprocess_image(image_path, height, width, rgb=rgb)
+    print(f"Preprocessing image: {image_path} (stain norm: {stain_norm})")
+    x, img_rgb = load_and_preprocess_image(
+        image_path, height, width, rgb=rgb, stain_norm=stain_norm, ref_means=ref_means, ref_stds=ref_stds
+    )
 
     print(f"Input tensor shape: {x.shape}, dtype: {x.dtype}, min/max: {x.min():.4f}/{x.max():.4f}")
 
@@ -123,8 +141,11 @@ def main():
 
     parser.add_argument("--alpha", type=float, default=0.45, help="Overlay blend strength (0..1)")
     parser.add_argument("--background-class", type=int, default=0, help="Which class id is background")
+    add_stain_norm_args(parser)
 
     args = parser.parse_args()
+    check_stain_args(parser, args)
+    ref_means, ref_stds = reference_from_args(args)
 
     forward_pass_single_image(
         model_path=args.model,
@@ -135,6 +156,9 @@ def main():
         rgb=args.rgb,
         alpha=args.alpha,
         background_class=args.background_class,
+        stain_norm=args.stain_norm,
+        ref_means=ref_means,
+        ref_stds=ref_stds,
     )
 
 
