@@ -59,7 +59,8 @@ python src/inspect_resolution.py /path/to/rat_original_scans --resize-to 256x192
 # 2. Check the human scans' pixel size
 python src/inspect_resolution.py /path/to/human_tiffs --csv outputs/human_mpp.csv
 
-# 3. Tile human images at the rat scale (add --mask-dir if you have label masks)
+# 3. Tile human images at the rat scale (add --mask-dir if you have label masks).
+#    Without --input-dir, data_paths.human_input_dir under $TOAD_DATA_ROOT is used.
 python src/preprocess_human_data.py \
   --input-dir /path/to/human_tiffs --output-dir outputs/human_none \
   --source-mpp auto --target-mpp <rat um/px> --stain-norm none
@@ -69,6 +70,9 @@ python src/preprocess_human_data.py \
 `forward_pass.py`, `predict.py`, and via `SEKO_STAIN_NORM` in `train.py`, so rat and human
 data can be run under the same setting. `src/compare_predictions.py` compares two prediction
 folders (e.g. none vs reinhard), with Dice when ground-truth masks are given.
+
+On HiPerGator, `hpg/human/stain_compare.slurm` runs the whole none-vs-reinhard comparison
+(preprocess both ways, predict, compare); its header lists the settings.
 
 Tests: `pytest` from the project root.
 

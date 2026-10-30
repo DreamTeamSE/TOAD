@@ -9,6 +9,7 @@ data_paths:   # relative to $TOAD_DATA_ROOT
   test_csv: "rat_original/test.csv"
   weights_in: "models/V2_best_model.keras"
   input_dir: "seko_storage/test/images"
+  human_input_dir: "Allen_Lab_SafO-FastGreen_images/TIFF_second_batch"  # preprocess_human_data.py default
 
 device: auto
 

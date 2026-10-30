@@ -38,7 +38,7 @@ def test_compare_predictions_agreement_and_dice(tmp_path):
     # bone Dice for B: 2*6 / (6 + 8) = 0.857
     dice_table = res.stdout.split("Dice none")[1]
     bone_line = next(line for line in dice_table.splitlines() if line.startswith("bone"))
-    assert bone_line.split()[1:] == ["1.000", "0.857"]
+    assert bone_line.split() == ["bone", "1.000", "+/-", "0.000", "0.857", "+/-", "0.000", "1"]
     assert not any(line.startswith("growth_plate") and "Dice" in line for line in res.stdout.splitlines())
     assert "predicted growth-plate share is 0.0000 (none) vs 0.1250 (reinhard)" in res.stdout
     assert csv_path.exists()
@@ -125,3 +125,30 @@ def test_predict_without_data_root_explains_env_var(tmp_path, monkeypatch):
     res = _py("predict.py", "--output-dir", str(tmp_path))
     assert res.returncode != 0
     assert "TOAD_DATA_ROOT is not set" in res.stderr
+
+
+
+def test_compare_scores_per_image_like_nnunet_evaluator(tmp_path):
+    # Image 1: all bone, predicted perfectly (bone Dice 1). Image 2: one bone pixel, missed (bone Dice 0).
+    # Per-image mean (the nnU-Net evaluator's method) is 0.5; pooling pixels first would give ~0.97.
+    a, b, gt = tmp_path / "a", tmp_path / "b", tmp_path / "gt"
+    for d in (a, b, gt):
+        d.mkdir()
+    t1 = np.ones((4, 4), np.uint8)
+    t2 = np.zeros((4, 4), np.uint8)
+    t2[0, 0] = 1
+    for name, truth, pred in (("i1", t1, t1), ("i2", t2, np.zeros_like(t2))):
+        cv2.imwrite(str(gt / f"{name}.png"), truth)
+        cv2.imwrite(str(a / f"prediction_{name}.tif"), pred)
+        cv2.imwrite(str(b / f"prediction_{name}.tif"), pred)
+    res = _py("compare_predictions.py", "--a", str(a), "--b", str(b), "--name-a", "x", "--name-b", "y",
+              "--gt-dir", str(gt), "--species", "rat")
+    assert res.returncode == 0, res.stderr
+    bone = next(line for line in res.stdout.split("Dice x")[1].splitlines() if line.startswith("bone"))
+    assert bone.split()[1:4] == ["0.500", "+/-", "0.500"]
+    # background is absent from both GT and prediction in image 1, so only image 2 scores it
+    bg = next(line for line in res.stdout.split("Dice x")[1].splitlines() if line.startswith("background"))
+    assert bg.split()[-1] == "1"
+    # growth plate never appears anywhere -> n/a, not 0 and not a crash
+    gp = next(line for line in res.stdout.split("Dice x")[1].splitlines() if line.startswith("growth_plate"))
+    assert "n/a" in gp

@@ -1,4 +1,5 @@
 import csv
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -253,3 +254,26 @@ def test_resize_mode_mask_uses_area_vote(tmp_path):
     m = cv2.imread(str(out / "masks" / "slide_processed.png"), cv2.IMREAD_UNCHANGED)
     assert m.shape == (TILE_H, TILE_W)
     assert set(np.unique(m)) <= {0, 1, 2, 4}
+
+
+def test_default_input_dir_comes_from_config(tmp_path):
+    human = tmp_path / "Allen_Lab_SafO-FastGreen_images" / "TIFF_second_batch"
+    human.mkdir(parents=True)
+    make_sample(tmp_path)
+    (tmp_path / "images" / "slide.tif").rename(human / "slide.tif")
+    out = tmp_path / "out"
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), "--output-dir", str(out), "--width", str(TILE_W), "--height", str(TILE_H)],
+        capture_output=True, text=True, env={**os.environ, "TOAD_DATA_ROOT": str(tmp_path)},
+    )
+    assert res.returncode == 0, res.stderr
+    assert f"under {human.resolve()}" in res.stdout
+    assert read_mapping(out)
+
+
+def test_default_input_dir_without_data_root_explains(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k != "TOAD_DATA_ROOT"}
+    res = subprocess.run([sys.executable, str(SCRIPT), "--output-dir", str(tmp_path)],
+                         capture_output=True, text=True, env=env)
+    assert res.returncode != 0
+    assert "TOAD_DATA_ROOT is not set" in res.stderr and "--input-dir" in res.stderr

@@ -1,9 +1,9 @@
 """
 Preprocess human histology images (.jpg/.jpeg/.tif/.tiff) for the TOAD models.
 
-Default input: ``Allen_Lab_SafO-FastGreen_images/TIFF_second_batch`` — collects images
-from that folder and from each immediate subfolder (e.g. ``*_bone_TIFF/*.tif``),
-excluding ``Processed_Images``.
+Default input: ``data_paths.human_input_dir`` in configs/baseline.yml, resolved against
+``$TOAD_DATA_ROOT`` (see src/config.py) — collects images from that folder and from each
+immediate subfolder (e.g. ``*_bone_TIFF/*.tif``), excluding ``Processed_Images``.
 
 Default output: ``TOAD/outputs/Processed_Images`` (created if missing).
 
@@ -51,6 +51,7 @@ from stain_norm import (
 )
 
 # Subfolder under TIFF_second_batch where outputs go; excluded from input discovery
+CONFIG_PATH = "configs/baseline.yml"
 PROCESSED_SUBDIR_NAME = "Processed_Images"
 MASK_SUBDIR_NAME = "masks"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".tif", ".tiff"}
@@ -600,7 +601,6 @@ def _positive_float(text: str) -> float:
 
 def build_parser() -> argparse.ArgumentParser:
     repo_root = Path(__file__).resolve().parents[1]
-    default_input = repo_root / "Allen_Lab_SafO-FastGreen_images" / "TIFF_second_batch"
     default_output = repo_root / "outputs" / PROCESSED_SUBDIR_NAME
 
     parser = argparse.ArgumentParser(
@@ -610,10 +610,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=default_input,
+        default=None,
         help=(
             "Root folder: images here and in each immediate subfolder are used "
-            f"(excludes '{PROCESSED_SUBDIR_NAME}'). Default: {default_input}"
+            f"(excludes '{PROCESSED_SUBDIR_NAME}'). Default: data_paths.human_input_dir "
+            "in configs/baseline.yml, under $TOAD_DATA_ROOT"
         ),
     )
     parser.add_argument(
@@ -738,9 +739,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def default_input_dir() -> Path:
+    """data_paths.human_input_dir from configs/baseline.yml, resolved against $TOAD_DATA_ROOT."""
+    from config import load_config
+
+    try:
+        data_paths = load_config(CONFIG_PATH)["data_paths"]
+    except EnvironmentError as exc:
+        raise SystemExit(f"{exc}\nOr pass --input-dir explicitly.") from None
+    if "human_input_dir" not in data_paths:
+        raise SystemExit(f"data_paths.human_input_dir is missing from {CONFIG_PATH}; pass --input-dir.")
+    return Path(data_paths["human_input_dir"])
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
+    if args.input_dir is None:
+        args.input_dir = default_input_dir()
     if not args.input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
     if args.mask_dir is not None and not args.mask_dir.is_dir():

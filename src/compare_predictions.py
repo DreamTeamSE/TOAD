@@ -8,10 +8,15 @@ Always reports:
   - pixel agreement between A and B (how much the setting changes the output)
   - share of pixels assigned to each class in A and in B
 
-With --gt-dir (masks written by preprocess_human_data.py --mask-dir) also reports
-pooled Dice per class for A and B. For --species human, growth plate is excluded from
-Dice (it is never labelled) and any pixel predicted as growth plate is counted as an
-error and reported separately.
+With --gt-dir (masks written by preprocess_human_data.py --mask-dir) also scores A and
+B against ground truth the same way as the nnU-Net baseline's evaluator
+(src/baselines/nnunet/evaluate_predictions.py, PR #18), so numbers are comparable:
+  - Dice and IoU per class computed per image, then mean +/- std across images; an image
+    where a class is absent from both ground truth and prediction is skipped for that class
+  - "mean across classes" = mean over every (image, class) score that exists
+  - pixel accuracy from the confusion matrix pooled over all images
+For --species human, growth plate is not scored (it is never labelled). Pixels predicted
+as growth plate still count against the true class, and their share is reported separately.
 
     python src/compare_predictions.py \\
         --a outputs/pred_none/Original_Predictions --name-a none \\
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import warnings
 from pathlib import Path
 
 import cv2
@@ -68,28 +74,59 @@ def out_of_range(mask: np.ndarray) -> int:
     return int(np.count_nonzero((mask < 0) | (mask >= NUM_CLASSES)))
 
 
-class DiceAccumulator:
-    """Pooled Dice: sum intersections and sizes over all images, then divide once."""
+def confusion_matrix(gt: np.ndarray, pred: np.ndarray) -> np.ndarray:
+    """Rows = ground truth, columns = prediction. Pixels outside the class IDs are ignored."""
+    valid = (gt >= 0) & (gt < NUM_CLASSES) & (pred >= 0) & (pred < NUM_CLASSES)
+    idx = gt[valid] * NUM_CLASSES + pred[valid]
+    return np.bincount(idx, minlength=NUM_CLASSES * NUM_CLASSES).reshape(NUM_CLASSES, NUM_CLASSES)
+
+
+def dice_iou(conf: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-class Dice and IoU for one image; NaN where the class is in neither GT nor prediction."""
+    tp = np.diag(conf).astype(np.float64)
+    fp = conf.sum(axis=0) - tp
+    fn = conf.sum(axis=1) - tp
+    with np.errstate(invalid="ignore", divide="ignore"):
+        dice = np.where(2 * tp + fp + fn > 0, 2 * tp / (2 * tp + fp + fn), np.nan)
+        iou = np.where(tp + fp + fn > 0, tp / (tp + fp + fn), np.nan)
+    return dice, iou
+
+
+class Scores:
+    """Per-image Dice/IoU and a pooled confusion matrix, for one prediction folder."""
 
     def __init__(self) -> None:
-        self.inter = np.zeros(NUM_CLASSES, dtype=np.int64)
-        self.pred = np.zeros(NUM_CLASSES, dtype=np.int64)
-        self.gt = np.zeros(NUM_CLASSES, dtype=np.int64)
+        self.dice: list[np.ndarray] = []
+        self.iou: list[np.ndarray] = []
+        self.pooled = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
 
-    def add(self, pred: np.ndarray, gt: np.ndarray) -> None:
-        for c in range(NUM_CLASSES):
-            p, g = pred == c, gt == c
-            self.inter[c] += int(np.logical_and(p, g).sum())
-            self.pred[c] += int(p.sum())
-            self.gt[c] += int(g.sum())
+    def add(self, pred: np.ndarray, gt: np.ndarray) -> float:
+        conf = confusion_matrix(gt, pred)
+        self.pooled += conf
+        dice, iou = dice_iou(conf)
+        self.dice.append(dice)
+        self.iou.append(iou)
+        return float(np.trace(conf) / conf.sum()) if conf.sum() else float("nan")
 
-    def dice(self, c: int) -> float | None:
-        denom = self.pred[c] + self.gt[c]
-        return None if denom == 0 else 2.0 * self.inter[c] / denom
+    def summary(self, classes: list[int]) -> dict:
+        dice = np.array(self.dice)[:, classes]
+        iou = np.array(self.iou)[:, classes]
+        # A class absent from every image gives an all-NaN column; its mean is NaN ("n/a").
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            return {
+                "dice_mean": np.nanmean(dice, axis=0),
+                "dice_std": np.nanstd(dice, axis=0),
+                "iou_mean": np.nanmean(iou, axis=0),
+                "n_present": np.sum(~np.isnan(dice), axis=0),
+                "mean_dice": np.nanmean(dice),
+                "mean_iou": np.nanmean(iou),
+                "pixel_accuracy": np.trace(self.pooled) / self.pooled.sum(),
+            }
 
 
-def _fmt(x: float | None) -> str:
-    return "  n/a" if x is None else f"{x:.3f}"
+def _fmt(x) -> str:
+    return "n/a" if x is None or np.isnan(x) else f"{x:.3f}"
 
 
 def main() -> None:
@@ -119,7 +156,7 @@ def main() -> None:
     agree_px = total_px = 0
     counts_a = np.zeros(NUM_CLASSES, dtype=np.int64)
     counts_b = np.zeros(NUM_CLASSES, dtype=np.int64)
-    dice_a, dice_b = DiceAccumulator(), DiceAccumulator()
+    scores_a, scores_b = Scores(), Scores()
     gt_pairs = 0
     rows = []
 
@@ -149,11 +186,9 @@ def main() -> None:
             if gt.shape != pa.shape:
                 print(f"[skip gt] {key}: ground truth {gt.shape} vs prediction {pa.shape}")
             else:
-                dice_a.add(pa, gt)
-                dice_b.add(pb, gt)
+                row["accuracy_" + args.name_a] = scores_a.add(pa, gt)
+                row["accuracy_" + args.name_b] = scores_b.add(pb, gt)
                 gt_pairs += 1
-                row["accuracy_" + args.name_a] = float((pa == gt).mean())
-                row["accuracy_" + args.name_b] = float((pb == gt).mean())
         for c in range(NUM_CLASSES):
             row[f"{args.name_a}_frac_{CLASS_NAMES[c]}"] = ca[c] / pa.size
             row[f"{args.name_b}_frac_{CLASS_NAMES[c]}"] = cb[c] / pb.size
@@ -176,15 +211,19 @@ def main() -> None:
     if args.gt_dir:
         print(f"\nGround truth paired for {gt_pairs} of {len(keys)} images.")
         if gt_pairs:
-            print(f"\n{'class':<14}{'Dice ' + args.name_a:>16}{'Dice ' + args.name_b:>16}")
             scored = [c for c in range(NUM_CLASSES) if c not in absent]
-            for c in scored:
-                print(f"{CLASS_NAMES[c]:<14}{_fmt(dice_a.dice(c)):>16}{_fmt(dice_b.dice(c)):>16}")
-            fg = [c for c in scored if c != 0]
-            for name, acc in ((args.name_a, dice_a), (args.name_b, dice_b)):
-                vals = [acc.dice(c) for c in fg if acc.dice(c) is not None]
-                if vals:
-                    print(f"Mean foreground Dice ({name}): {np.mean(vals):.3f} over {len(vals)} classes")
+            sa, sb = scores_a.summary(scored), scores_b.summary(scored)
+            print("Per-image Dice, mean +/- std across images (same method as the nnU-Net evaluator):")
+            print(f"\n{'class':<14}{'Dice ' + args.name_a:>20}{'Dice ' + args.name_b:>20}{'images':>8}")
+            for i, c in enumerate(scored):
+                cell_a = f"{_fmt(sa['dice_mean'][i])} +/- {_fmt(sa['dice_std'][i])}"
+                cell_b = f"{_fmt(sb['dice_mean'][i])} +/- {_fmt(sb['dice_std'][i])}"
+                print(f"{CLASS_NAMES[c]:<14}{cell_a:>20}{cell_b:>20}{int(sa['n_present'][i]):>8}")
+            for name, sm in ((args.name_a, sa), (args.name_b, sb)):
+                print(
+                    f"{name}: mean Dice {_fmt(sm['mean_dice'])}, mean IoU {_fmt(sm['mean_iou'])}, "
+                    f"pixel accuracy {_fmt(sm['pixel_accuracy'])} ({len(scored)} classes scored)"
+                )
 
     if args.csv:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
