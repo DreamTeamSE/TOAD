@@ -2,45 +2,35 @@
 #SBATCH --job-name=nnunet-train
 #SBATCH --account=dream_team
 #SBATCH --qos=dream_team
-#SBATCH --partition=gpu
-#SBATCH --gpus=a100:1
+#SBATCH --partition=hpg-turin
+#SBATCH --gpus=l4:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32gb
-#SBATCH --time=30:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
-# Planned responsibilities: nnUNetv2_train XXX 2d <fold> — a single 2D
-# config/fold for this first baseline (full 5-fold CV is a later stretch
-# goal). No existing per-epoch timing on this cluster/data — first
-# submission should use a short --time + reduced epochs as a smoke test,
-# then size a real run's --time from the observed per-epoch cost.
+# nnUNetv2_train on a single 2D config/fold (full 5-fold CV is a later
+# stretch goal). Team-confirmed run parameters: 250 epochs, hpg-turin
+# partition, 1 L4 GPU, one day of walltime.
 #
 # Resource allocation below is sized from a real smoke test (job 46886051,
-# nnUNetTrainer_1epoch, --partition=hpg-turin --gpus=l4:1, 2026-10-20):
+# nnUNetTrainer_1epoch, 2026-10-20):
 #   --cpus-per-task=8 : measured avg CPU utilization was only ~20%, well
 #                        within 8 cores for this dataset's small 2D patches.
 #   --mem=32gb         : measured peak RSS was ~16.9GB; 32gb keeps ~2x headroom.
-#   --time=30:00:00    : measured epoch time was 77.92s; 1000 epochs ≈ 21.7h,
-#                        plus ~1min startup and ~13s final validation. 30h
-#                        gives buffer against cluster variance. Check the
-#                        partition's actual max walltime
-#                        (`sinfo -p hpg-turin -o "%l"`) before relying on this.
-#   --gpus=a100:1      : placeholder — no A100s exist on this cluster. See
-#                        the open GPU item in the project plan (pending
-#                        confirmation from Ani) for why this isn't committed
-#                        here yet; the smoke test used a submit-time
-#                        override (--partition=hpg-turin --gpus=l4:1).
+#   --time=24:00:00    : measured epoch time was 77.92s; 250 epochs ≈ 5.4h,
+#                        well under the one-day budget given.
 #
 # No CUDA OOM: batch_size=14 @ patch_size (192,256) fit comfortably in the
 # L4's 24GB VRAM.
 #
-# TRAINER/FOLD are overridable so this one script covers both the mandatory
-# smoke test and the full run:
+# TRAINER/FOLD are overridable so this one script also covers a cheap smoke
+# test if the pipeline ever needs re-validating after a change:
 #   sbatch --time=00:30:00 --export=TRAINER=nnUNetTrainer_1epoch hpg/nnunet/train_nnunet.slurm   # smoke test
-#   sbatch hpg/nnunet/train_nnunet.slurm                                                          # full run (default trainer, 1000 epochs)
+#   sbatch hpg/nnunet/train_nnunet.slurm                                                          # real run (250 epochs)
 #
 # Requires prepare_data.slurm to have already run successfully (reads
 # $nnUNet_preprocessed/Dataset001_Rat/, does not touch $TOAD_DATA_ROOT).
@@ -52,7 +42,7 @@ DATASET_NAME=Rat
 DATASET_DIR_NAME="Dataset$(printf '%03d' "$DATASET_ID")_${DATASET_NAME}"
 CONFIGURATION=2d
 FOLD="${FOLD:-0}"
-TRAINER="${TRAINER:-nnUNetTrainer}"
+TRAINER="${TRAINER:-nnUNetTrainer_250epochs}"
 
 REPO_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 DATA_ROOT="${DATA_ROOT:-/blue/dream_team/$USER/seko_storage}"  # must match prepare_data.slurm's DATA_ROOT -- that's where nnUNet_preprocessed was populated
