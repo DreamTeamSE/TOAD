@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-# WARNING: NOT MAINTAINED. Known bug: multi_unet_model() calls model.compile()
-# before `model` is defined, so it will crash (UnboundLocalError) if training is
-# re-enabled. Fix that before using this script to train.
+# WARNING: NOT MAINTAINED. Training is commented out; re-check before re-enabling.
 """
 Created on Mon Mar 18 14:55:00 2024
 
@@ -21,6 +19,8 @@ from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from matplotlib import pyplot as plt
+
+from stain_norm import STAIN_NORM_METHODS, apply_stain_norm, load_reinhard_ref_json
 
 # Model building function
 def multi_unet_model(n_classes=5, IMG_HEIGHT=192, IMG_WIDTH=256, IMG_CHANNELS=3):
@@ -78,7 +78,6 @@ def multi_unet_model(n_classes=5, IMG_HEIGHT=192, IMG_WIDTH=256, IMG_CHANNELS=3)
     c9 = Conv2D(16, (3, 3), activation='relu', kernel_initializer='he_normal', padding='same')(c9)
     
     #NOTE: Compile the model in the main program to make it easy to test with various loss functions
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     
     #model.summary()
     
@@ -99,8 +98,19 @@ mask_paths  = dataframe["Mask"].tolist()
 if len(image_paths) == 0 or len(mask_paths) == 0:
     raise ValueError("No image paths or mask paths found in the CSV file. Please check the CSV file and ensure it contains valid paths.")
 
+# Stain normalization must match what inference uses (see src/stain_norm.py).
+stain_norm = os.environ.get("SEKO_STAIN_NORM", "none")
+if stain_norm not in STAIN_NORM_METHODS:
+    raise ValueError(f"SEKO_STAIN_NORM must be one of {STAIN_NORM_METHODS}, got {stain_norm!r}")
+ref_json = os.environ.get("SEKO_REINHARD_REF_JSON")
+ref_means, ref_stds = load_reinhard_ref_json(ref_json) if ref_json else (None, None)
+print(f"Stain normalization: {stain_norm}" + (f" (reference {ref_json})" if ref_json else ""))
+
 # Reading images
-train_images = [cv2.imread(img_path, 1) for img_path in image_paths]
+train_images = [
+    apply_stain_norm(cv2.imread(img_path, 1), stain_norm, ref_means=ref_means, ref_stds=ref_stds)
+    for img_path in image_paths
+]
 train_images = np.array(train_images)
 
 # Reading masks

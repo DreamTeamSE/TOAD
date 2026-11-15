@@ -43,12 +43,37 @@ def merge_osteophyte(mask: np.ndarray) -> np.ndarray:
     return merged
 
 
-def validate_mask(mask: np.ndarray) -> None:
-    """Raise if a mask contains values outside the contract's class IDs."""
-    invalid = set(np.unique(mask)) - set(CLASS_NAMES)
-    if invalid:
-        raise ValueError(
-            f"Mask contains invalid class IDs {sorted(invalid)}. "
-            f"Expected only {sorted(CLASS_NAMES)}. "
-            "Did you forget merge_osteophyte()?"
-        )
+# Adult human knees have fused growth plates, so class 3 is never annotated in
+# human masks. The model keeps the output channel (NUM_CLASSES stays 5) so rat and
+# human models share one head; on human data a predicted 3 is simply an error.
+HUMAN_ABSENT_CLASSES = frozenset({GROWTH_PLATE})
+HUMAN_CLASS_IDS = frozenset(CLASS_NAMES) - HUMAN_ABSENT_CLASSES
+
+
+def validate_mask(mask: np.ndarray, allowed=None) -> None:
+    """Raise if a mask contains values outside ``allowed`` (default: all contract IDs)."""
+    allowed = set(CLASS_NAMES) if allowed is None else set(allowed)
+    present = {int(v) for v in np.unique(mask)}
+    invalid = present - allowed
+    if not invalid:
+        return
+    hints = []
+    known = invalid & set(CLASS_NAMES)
+    if known:
+        names = ", ".join(f"{i} ({CLASS_NAMES[i]})" for i in sorted(known))
+        hints.append(f"Class {names} is not allowed for this data.")
+    if invalid - known:
+        hints.append("Did you forget merge_osteophyte()?")
+    raise ValueError(
+        f"Mask contains invalid class IDs {sorted(invalid)}. "
+        f"Expected only {sorted(allowed)}. {' '.join(hints)}"
+    )
+
+
+def prepare_mask(mask: np.ndarray, species: str) -> np.ndarray:
+    """Merge osteophyte into cartilage and validate against the species' classes."""
+    if species not in ("rat", "human"):
+        raise ValueError(f"species must be 'rat' or 'human', got {species!r}")
+    merged = merge_osteophyte(mask)
+    validate_mask(merged, allowed=HUMAN_CLASS_IDS if species == "human" else None)
+    return merged
